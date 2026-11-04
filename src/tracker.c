@@ -6,6 +6,9 @@
 #include <errno.h>
 #include <sys/dir.h>
 
+// Load the config loader
+#include "project_502/config_loaders.h"
+
 main()
 {
 	pid_t pid;
