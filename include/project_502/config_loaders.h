@@ -38,4 +38,9 @@ typedef struct
     char peer_data_folder;
 } ServerThreadConfig;
 
+// Public function declaration
+int sconfig_loader(const char *filename, SConfig *config);
+int client_thread_config_loader(const char *filename, ClientThreadConfig *config);
+int server_thread_config_loader(const char *filename, ServerThreadConfig *config);
+
 #endif
