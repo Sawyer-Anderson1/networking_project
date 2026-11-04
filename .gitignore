@@ -1,0 +1,4 @@
+# .gitignore
+sconfig.cfg
+clientThreadConfig.cfg
+serverThreadConfig.cfg
