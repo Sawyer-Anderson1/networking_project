@@ -7,11 +7,41 @@
 // Import the config loaders
 #include "project_502/config_loaders.h"
 
+/*
+	clientThreadConfig is the same among each peer,
+	however each peer (especially if they're on the same machines) will have different
+	serverThreadConfigs
+		-> To solve these the scripts to create the different peers will modify the base port by +1
+			and then write to the config file.
+			And it will also do a similar thing for the folder names (i.e folder1, folder2, folder3, ...)
+*/
 main(int argc, char *argv[])
 {
+	// Load the port, server IP, and update interval from the clientThreadConfig file using it's config loader
+	// Used for peer to tracker and download behavior
+	ClientThreadConfig peer_to_tracker_config = {0};
+	if (!client_thread_config_loader("clientThreadConfig.cfg", &peer_to_tracker_config))
+	{
+		fprintf(stderr, "Error loading clientThreadConfig.cfg configuration.\n");
+		return 1;
+	}
+	unsigned short int server_port = peer_to_tracker_config.server_port;
+	struct in_addr server_ip = peer_to_tracker_config.server_ip;
+	int update_interval = peer_to_tracker_config.update_interval;
 
-	char server_address[50];
-	int server_port = 3490; // you should instead read from configuration file
+	// Load the peer's port and peer's folder for documents from the serverThreadConfig file using it's config loader
+	// Used for peer's listening for other peers that want to download it's documents, so for uploading
+	ServerThreadConfig upload_config = {0};
+	if (!server_thread_config_loader("serverThreadConfig.cfg", &upload_config))
+	{
+		fprintf(stderr, "Error loading serverThreadConfig.cfg configuration.\n");
+		return 1;
+	}
+	unsigned short int peer_port = upload_config.peer_port;
+	char peer_data_folder = upload_config.peer_data_folder;
+
+	// char server_address[50];
+	// int server_port = 3490; // you should instead read from configuration file
 
 	struct sockaddr_in server_addr;
 	int sockid;

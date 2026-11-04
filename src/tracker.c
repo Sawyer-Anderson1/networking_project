@@ -20,6 +20,17 @@ main()
 		exit(0);
 	}
 
+	// Load the port, shared directory name, and dead peer timeout interval from the sconfig file using it's config loader
+	SConfig server_config = {0};
+	if (!sconfig_loader("sconfig.cfg", &server_config))
+	{
+		fprintf(stderr, "Error loading sconfig.cfg configuration.\n");
+		return 1;
+	}
+	unsigned short int server_port = server_config.server_port;
+	char shared_directory = server_config.shared_directory;
+	int dead_peer_timeout = server_config.dead_peer_timeout;
+
 	// socket created at this stage
 	// now associate the socket with local port to allow listening incoming connections
 	server_addr.sin_family = AF_INET;		   // assign address family
