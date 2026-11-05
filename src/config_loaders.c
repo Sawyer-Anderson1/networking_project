@@ -1,4 +1,6 @@
 #include "project_502/config_loaders.h"
+#include "project_502/common.h"
+
 #include <stdio.h> // For file I/O ops
 /* stdio.h Commands or Data Types Used:
     FILE: data type representing the file stream
@@ -28,8 +30,6 @@
 /* arpa/inet.h Commands Used:
     inet_pton: Used to convert IP strings to binary
 */
-
-MAX_LINE_LEN = 256;
 
 // Static helper function to trim whitespace from string
 static void trim(char *str)
@@ -69,7 +69,7 @@ int sconfig_loader(const char *filename, SConfig *config)
         return 0; // Returning 0 since this is essentially boolean
     }
 
-    char line[MAX_LINE_LEN];
+    char line[MAXLINE];
     while (fgets(line, sizeof(line), file))
     {
         // call trim helper function
@@ -126,7 +126,7 @@ int client_thread_config_loader(const char *filename, ClientThreadConfig *config
         return 0; // Returning 0 since this is essentially boolean
     }
 
-    char line[MAX_LINE_LEN];
+    char line[MAXLINE];
     while (fgets(line, sizeof(line), file))
     {
         // call trim helper function
@@ -201,7 +201,7 @@ int server_thread_config_loader(const char *filename, ServerThreadConfig *config
         return 0; // Returning 0 since this is essentially boolean
     }
 
-    char line[MAX_LINE_LEN];
+    char line[MAXLINE];
     while (fgets(line, sizeof(line), file))
     {
         // call trim helper function
