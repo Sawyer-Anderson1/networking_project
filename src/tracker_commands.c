@@ -188,6 +188,43 @@ int handle_list_req(int server_worker, const char shared_directory)
 
     closedir(torrents); // Close the directory stream
 
+    // Then write the contents of the RESP_LIST array to the peer
+    char send_buf[512];
+
+    // Define the first part of the response (<REP LIST X>\n)
+    int len = snprintf(send_buf, sizeof(send_buf), "<REP LIST %u>\n", count);
+    ssize_t bytes_sent = send(server_worker, send_buf, len, 0);
+
+    for (size_t i = 1; i <= count; i++)
+    {
+        // Format the line for the current file
+        int len = snprintf(send_buf, sizeof(send_buf), "<%u %s %zu %x>\n", i, resp_arr[i].filename, resp_arr[i].filesize, resp_arr[i].md5_string);
+
+        if (len < 0 || (size_t)len >= sizeof(send_buf))
+        {
+            fprintf(stderr, "Formatting error or buffer overflow for %s\n", resp_arr[i].filename);
+            continue;
+        }
+
+        // Send the formatted string over the socket (handle partial writes)
+        size_t total_sent = 0;
+        while (total_sent < (size_t)len)
+        {
+            ssize_t bytes_sent = send(server_worker, send_buf + total_sent, len - total_sent, 0);
+            if (bytes_sent <= 0)
+            {
+                perror("Failed to send LIST entry");
+                free(resp_arr);
+                return -1;
+            }
+            total_sent += (size_t)bytes_sent;
+        }
+    }
+
+    // Send the final line
+    len = snprintf(send_buf, sizeof(send_buf), "<REP LIST END>\n");
+    bytes_sent = send(server_worker, send_buf, len, 0);
+
     // Free the heap memory
     free(resp_arr);
     return 0;
