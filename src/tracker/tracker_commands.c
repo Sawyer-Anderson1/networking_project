@@ -1,5 +1,6 @@
 #include "project_502/tracker_commands.h"
 #include "project_502/common.h"
+#include "project_502/md5_handler.h"
 
 #include <dirent.h>
 /* dirent.h Commands or Data Types Used:
@@ -35,6 +36,7 @@
 /* stdlib.h Commands Used:
     free
 */
+
 // Static helper functions
 static char *trim_whitespace(char *str)
 {
@@ -65,7 +67,7 @@ typedef struct
 {
     char filename[256];
     size_t filesize;
-    char md5_string[33]; // Converted from the unsigned char [16] of the binary/byte form, so the final value can be displayed
+    unsigned char md5_string[MD5_HEX_LEN]; // Converted from the unsigned char [16] of the binary/byte form, so the final value can be displayed
 } RESP_LIST;
 
 // Helper function to append a new file information to the LIST Response array
@@ -323,7 +325,7 @@ int handle_get_req(int server_worker, const char *fname, const char *shared_dire
     struct stat path_stat;
     char *buffer = NULL; // Stays NULL until the tracker file is read, so we can tell if it was found
     long size = 0;
-    char md5[33]; // MD5 of the tracker file content as 32 hex chars + null terminator
+    char md5[MD5_HEX_LEN]; // MD5 of the tracker file content as 32 hex chars + null terminator
 
     while ((entry = readdir(torrents)) != NULL)
     {
@@ -413,6 +415,14 @@ int handle_get_req(int server_worker, const char *fname, const char *shared_dire
     }
 
     // Send the tracker file content as is (handle partial writes)
+    if (send_all(server_worker, "<", 1) < 0)
+    {
+        perror("Failed to send GET content start");
+        free(buffer);
+        return -1;
+    }
+
+    // Send the tracker file content as is (handle partial writes)
     if (send_all(server_worker, buffer, (size_t)size) < 0)
     {
         perror("Failed to send GET content");
@@ -420,10 +430,12 @@ int handle_get_req(int server_worker, const char *fname, const char *shared_dire
         return -1;
     }
 
-    // Make sure the END line starts on its own line
-    if (size > 0 && buffer[size - 1] != '\n')
+    // Close the wrapper, the newline also makes sure the END line starts on its own line
+    if (send_all(server_worker, ">\n", 2) < 0)
     {
-        send_all(server_worker, "\n", 1);
+        perror("Failed to send GET content end");
+        free(buffer);
+        return -1;
     }
 
     // Send the final line
