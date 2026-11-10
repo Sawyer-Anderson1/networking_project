@@ -1,4 +1,5 @@
 #include "project_502/tracker_commands.h"
+#include "project_502/common.h"
 
 #include <dirent.h>
 /* dirent.h Commands or Data Types Used:
@@ -28,6 +29,7 @@
 /* string.h Commands used:
     strncmp: used to check for filename, filesize, and MD5 fields
     strlen: Used to get the number of chars in a field
+    strncpy: To get a copy string
 */
 #include <stdlib.h>
 /* stdlib.h Commands Used:
@@ -230,8 +232,32 @@ int handle_list_req(int server_worker, const char shared_directory)
     return 0;
 }
 
-char xtract_fname(char read_msg)
+char fname[256];
+char *xtract_fname(char read_msg)
 {
+    char copy[MAXLINE];
+    char *tok;
+    int len;
+
+    strncpy(copy, read_msg, MAXLINE - 1);
+    copy[MAXLINE - 1] = '\0';
+
+    /* strip trailing newline, carriage return, spaces and the closing '>' */
+    len = strlen(copy);
+    while (len > 0 && (copy[len - 1] == '\n' || copy[len - 1] == '\r' ||
+                       copy[len - 1] == ' ' || copy[len - 1] == '>'))
+        copy[--len] = '\0';
+
+    tok = strtok(copy, " "); // To get '<GET' before filename
+    tok = strtok(NULL, " "); // To get second token, the filename.track
+
+    if (tok == NULL || strlen(tok) >= sizeof(fname))
+        return NULL; /* missing or too long */
+    if (strchr(tok, '/') != NULL || strstr(tok, "..") != NULL)
+        return NULL; /* path traversal attempt */
+
+    strcpy(fname, tok);
+    return fname;
 }
 
 void handle_get_req(int server_worker, char fname)
