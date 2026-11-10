@@ -1,0 +1,2 @@
+Tracker Compilation Command (This will go into the makefile)
+    gcc -Iinclude src/tracker/tracker.c src/tracker/tracker_command.c src/config_loaders.c -o tracker -lcrypto
