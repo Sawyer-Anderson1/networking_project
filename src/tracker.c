@@ -113,7 +113,7 @@ peer_handler(int sock_child, const char shared_directory)
 	else if ((strstr(read_msg, "get") != NULL) || (strstr(read_msg, "GET") != NULL))
 	{										// get command received
 		char fname = xtrct_fname(read_msg); // extract filename from the command
-		handle_get_req(sock_child, fname);
+		handle_get_req(sock_child, fname, shared_directory);
 	}
 	else if ((strstr(read_msg, "createtracker") != NULL) || (strstr(read_msg, "Createtracker") != NULL) || (strstr(read_msg, "CREATETRACKER") != NULL))
 	{ // get command received
