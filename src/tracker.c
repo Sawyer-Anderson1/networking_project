@@ -11,6 +11,11 @@
 #include <errno.h>
 #include <sys/dir.h>
 
+#include <sys/stat.h>
+/* sys/stat.h Commands Used:
+	mkdir(): To make the shared torrent directory
+*/
+
 main()
 {
 	pid_t pid;
@@ -30,8 +35,22 @@ main()
 		exit(1);
 	}
 	unsigned short int server_port = server_config.server_port;
-	char shared_directory = server_config.shared_directory;
+	const char *shared_directory = server_config.shared_directory;
 	int dead_peer_timeout = server_config.dead_peer_timeout;
+
+	/*******************************
+		On creation of the Server,
+		create the shared directory
+	*******************************/
+	// Uses permission 0700 for security reasons, only the tracker server can edit the shared folder torrents
+	if (mkdir(shared_directory, 0700) == 0)
+	{
+		printf("Directory '%s' created successfully.\n", shared_directory);
+	}
+	else
+	{
+		fprintf(stderr, "Failed to create the shared directory %s\n", shared_directory);
+	}
 
 	// socket created at this stage
 	// now associate the socket with local port to allow listening incoming connections
@@ -68,17 +87,17 @@ main()
 
 		// create the worker threads via fork
 		if ((pid = fork()) == 0)
-		{							  // New child process will serve the requester client. separate child will serve separate client
-			close(sockid);			  // child does not need listener
-			peer_handler(sock_child); // child is serving the client.
-			close(sock_child);		  // printf("\n 1. closed");
-			exit(0);				  // kill the process. child process all done with work
+		{												// New child process will serve the requester client. separate child will serve separate client
+			close(sockid);								// child does not need listener
+			peer_handler(sock_child, shared_directory); // child is serving the client.
+			close(sock_child);							// printf("\n 1. closed");
+			exit(0);									// kill the process. child process all done with work
 		}
 		close(sock_child); // parent all done with client, only child will communicate with that client from now
 	} // accept loop ends
 } // main fun ends
 
-peer_handler(int sock_child)
+peer_handler(int sock_child, const char shared_directory)
 { // function for file transfer. child process will call this function
 	// start handiling client request
 	int length;
@@ -87,8 +106,8 @@ peer_handler(int sock_child)
 
 	read_msg[length] = '\0';
 	if ((strcmp(read_msg, "REQ LIST") == 0) || (strcmp(read_msg, "req list") == 0) || (strcmp(read_msg, "<REQ LIST>") == 0) || (strcmp(read_msg, "<REQ LIST>\n") == 0))
-	{								 // list command received
-		handle_list_req(sock_child); // handle list request
+	{												   // list command received
+		handle_list_req(sock_child, shared_directory); // handle list request
 		printf("list request handled.\n");
 	}
 	else if ((strstr(read_msg, "get") != NULL) || (strstr(read_msg, "GET") != NULL))

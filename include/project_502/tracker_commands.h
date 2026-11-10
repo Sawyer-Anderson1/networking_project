@@ -31,8 +31,8 @@ typedef struct
 } UpdateCommand;
 
 // Public function declaration
-int handle_list_req(int server_worker);
-char xtract_fname(char read_msg);
+int handle_list_req(int server_worker, const char shared_directory);
+char *xtract_fname(char read_msg);
 void handle_get_req(int server_worker, char fname);
 CreateCommand tokenize_createmsg(char read_msg);
 void handle_createtracker_req(int server_worker, CreateCommand command);
