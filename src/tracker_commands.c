@@ -89,7 +89,7 @@ int add_resp(RESP_LIST **resp_arr, size_t *count, size_t *capacity, RESP_LIST ne
     return 1; // Success
 }
 
-int handle_list_req(int server_worker, const char shared_directory)
+int handle_list_req(int server_worker, const char *shared_directory)
 {
     char dir_path[512];
     snprintf(dir_path, sizeof(dir_path), "./%s", shared_directory);
@@ -97,7 +97,7 @@ int handle_list_req(int server_worker, const char shared_directory)
     DIR *torrents = opendir(dir_path);
     if (torrents == NULL)
     {
-        fprintf(stderr, "Unable to open directory: %s", shared_directory);
+        fprintf(stderr, "Unable to open directory: %s\n", shared_directory);
         return -1;
     }
 
@@ -119,6 +119,12 @@ int handle_list_req(int server_worker, const char shared_directory)
             continue;
         }
 
+        // Skip anything that is not a tracker file (temp files, stray files, etc.)
+        if (!has_track_suffix(entry->d_name))
+        {
+            continue;
+        }
+
         // Build the full file path
         // readdir only gives bare filename
         snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
@@ -132,7 +138,7 @@ int handle_list_req(int server_worker, const char shared_directory)
             FILE *file = fopen(full_path, "r");
             if (file == NULL)
             {
-                fprintf(stderr, "Could not open file: %s", full_path);
+                fprintf(stderr, "Could not open file: %s\n", full_path);
                 continue;
             }
 
@@ -177,6 +183,13 @@ int handle_list_req(int server_worker, const char shared_directory)
 
             fclose(file);
 
+            // Skip tracker files that are missing the filename or MD5 so the count matches what we send
+            if (new_resp.filename[0] == '\0' || new_resp.md5_string[0] == '\0')
+            {
+                fprintf(stderr, "Skipping malformed tracker file: %s\n", full_path);
+                continue;
+            }
+
             // Append the RESP_LIST struct to its array
             if (!add_resp(&resp_arr, &count, &capacity, new_resp))
             {
@@ -194,46 +207,77 @@ int handle_list_req(int server_worker, const char shared_directory)
     char send_buf[512];
 
     // Define the first part of the response (<REP LIST X>\n)
-    int len = snprintf(send_buf, sizeof(send_buf), "<REP LIST %u>\n", count);
-    ssize_t bytes_sent = send(server_worker, send_buf, len, 0);
+    int len = snprintf(send_buf, sizeof(send_buf), "<REP LIST %zu>\n", count);
+    if (send_all(server_worker, send_buf, (size_t)len) < 0)
+    {
+        perror("Failed to send LIST header");
+        free(resp_arr);
+        return -1;
+    }
 
-    for (size_t i = 1; i <= count; i++)
+    // Array indexes start at 0, but the line numbers sent to the peer start at 1
+    for (size_t i = 0; i < count; i++)
     {
         // Format the line for the current file
-        int len = snprintf(send_buf, sizeof(send_buf), "<%u %s %zu %x>\n", i, resp_arr[i].filename, resp_arr[i].filesize, resp_arr[i].md5_string);
+        int len = snprintf(send_buf, sizeof(send_buf), "<%zu %s %zu %s>\n", i + 1, resp_arr[i].filename, resp_arr[i].filesize, resp_arr[i].md5_string);
 
+        // The count was already sent, so a skipped line would leave the peer waiting; fail instead
         if (len < 0 || (size_t)len >= sizeof(send_buf))
         {
             fprintf(stderr, "Formatting error or buffer overflow for %s\n", resp_arr[i].filename);
-            continue;
+            free(resp_arr);
+            return -1;
         }
 
         // Send the formatted string over the socket (handle partial writes)
-        size_t total_sent = 0;
-        while (total_sent < (size_t)len)
+        if (send_all(server_worker, send_buf, (size_t)len) < 0)
         {
-            ssize_t bytes_sent = send(server_worker, send_buf + total_sent, len - total_sent, 0);
-            if (bytes_sent <= 0)
-            {
-                perror("Failed to send LIST entry");
-                free(resp_arr);
-                return -1;
-            }
-            total_sent += (size_t)bytes_sent;
+            perror("Failed to send LIST entry");
+            free(resp_arr);
+            return -1;
         }
     }
 
     // Send the final line
     len = snprintf(send_buf, sizeof(send_buf), "<REP LIST END>\n");
-    bytes_sent = send(server_worker, send_buf, len, 0);
+    if (send_all(server_worker, send_buf, (size_t)len) < 0)
+    {
+        perror("Failed to send LIST end");
+        free(resp_arr);
+        return -1;
+    }
 
     // Free the heap memory
     free(resp_arr);
     return 0;
 }
 
+// Helper function to send every byte of a buffer, handling partial writes
+static int send_all(int s, const char *buf, size_t len)
+{
+    size_t total_sent = 0;
+    while (total_sent < len)
+    {
+        ssize_t bytes_sent = send(s, buf + total_sent, len - total_sent, 0);
+        if (bytes_sent <= 0)
+        {
+            return -1;
+        }
+        total_sent += (size_t)bytes_sent;
+    }
+    return 0;
+}
+
+// Helper function to check that a filename ends in ".track"
+static int has_track_suffix(const char *name)
+{
+    size_t n = strlen(name);
+    size_t suffix_len = strlen(".track");
+    return n > suffix_len && strcmp(name + n - suffix_len, ".track") == 0;
+}
+
 char fname[256];
-char *xtract_fname(char read_msg)
+char *xtract_fname(char *read_msg)
 {
     char copy[MAXLINE];
     char *tok;
@@ -255,13 +299,146 @@ char *xtract_fname(char read_msg)
         return NULL; /* missing or too long */
     if (strchr(tok, '/') != NULL || strstr(tok, "..") != NULL)
         return NULL; /* path traversal attempt */
+    if (!has_track_suffix(tok))
+        return NULL; /* GET must ask for a .track file */
 
     strcpy(fname, tok);
     return fname;
 }
 
-void handle_get_req(int server_worker, char fname)
+int handle_get_req(int server_worker, const char *fname, const char *shared_directory)
 {
+    char dir_path[512];
+    snprintf(dir_path, sizeof(dir_path), "./%s", shared_directory);
+
+    DIR *torrents = opendir(dir_path);
+    if (torrents == NULL)
+    {
+        fprintf(stderr, "Unable to open directory: %s\n", shared_directory);
+        return -1;
+    }
+
+    struct dirent *entry;
+    char full_path[1024];
+    struct stat path_stat;
+    char *buffer = NULL; // Stays NULL until the tracker file is read, so we can tell if it was found
+    long size = 0;
+    char md5[33]; // MD5 of the tracker file content as 32 hex chars + null terminator
+
+    while ((entry = readdir(torrents)) != NULL)
+    {
+        // Skip "." and "..", just to be safe
+        // These shouldn't be any in the directory
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+        {
+            continue;
+        }
+
+        // check if its the correct name
+        if (strcmp(entry->d_name, fname) == 0)
+        {
+            // Build the full file path
+            // readdir only gives bare filename
+            snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
+
+            // Check if entry is a regular file (skip subfolders)
+            if (stat(full_path, &path_stat) == 0 && S_ISREG(path_stat.st_mode))
+            {
+                // Open the tracker file; the MD5 sent back is computed from this content, not read from the file
+                FILE *file = fopen(full_path, "rb");
+                if (file == NULL)
+                {
+                    fprintf(stderr, "Could not open file: %s\n", full_path);
+                    break;
+                }
+
+                // Move to the end of the file to get its size
+                fseek(file, 0L, SEEK_END);
+                size = ftell(file);
+                rewind(file);
+                if (size < 0)
+                {
+                    fclose(file);
+                    break;
+                }
+
+                // Allocate memory for the content + null terminator
+                buffer = malloc(size + 1);
+                if (!buffer)
+                {
+                    fclose(file);
+                    break;
+                }
+
+                // Read the file into the buffer
+                size_t read_bytes = fread(buffer, 1, size, file);
+                if (read_bytes != (size_t)size)
+                {
+                    free(buffer);
+                    buffer = NULL; // So the check below sees a failed read
+                    fclose(file);
+                    break;
+                }
+
+                buffer[size] = '\0'; // Null-terminate the string
+
+                fclose(file);
+                break;
+            }
+        }
+    }
+
+    closedir(torrents); // Close the directory stream, every path above ends up here
+
+    // File was not found or could not be read
+    if (buffer == NULL)
+    {
+        fprintf(stderr, "GET: could not read tracker file %s\n", fname);
+        return -1;
+    }
+
+    // MD5 of the tracker file content, the peer checks the received data against this
+    compute_md5_hex((unsigned char *)buffer, (size_t)size, md5);
+
+    // Then write the contents of the file to the peer
+    char end_line[64];
+
+    // Define the first part of the response (<REP GET BEGIN>\n)
+    const char *begin_line = "<REP GET BEGIN>\n";
+    if (send_all(server_worker, begin_line, strlen(begin_line)) < 0)
+    {
+        perror("Failed to send GET begin");
+        free(buffer);
+        return -1;
+    }
+
+    // Send the tracker file content as is (handle partial writes)
+    if (send_all(server_worker, buffer, (size_t)size) < 0)
+    {
+        perror("Failed to send GET content");
+        free(buffer);
+        return -1;
+    }
+
+    // Make sure the END line starts on its own line
+    if (size > 0 && buffer[size - 1] != '\n')
+    {
+        send_all(server_worker, "\n", 1);
+    }
+
+    // Send the final line
+    int len = snprintf(end_line, sizeof(end_line), "<REP GET END %s>\n", md5);
+    if (send_all(server_worker, end_line, (size_t)len) < 0)
+    {
+        perror("Failed to send GET end");
+        free(buffer);
+        return -1;
+    }
+
+    // Free the buffer
+    free(buffer);
+
+    return 0;
 }
 
 CreateCommand tokenize_createmsg(char read_msg)
