@@ -77,8 +77,7 @@ main()
 	{
 		printf("Directory '%s' created successfully.\n", shared_directory);
 	}
-
-	if (errno == EEXIST)
+	else if (errno == EEXIST)
 	{
 		// This mean the directory already exists in the file system, so needs to be done
 		struct stat st;
@@ -133,8 +132,12 @@ main()
 		int sock_child;
 		socklen_t clilen = sizeof(client_addr);
 		if ((sock_child = accept(sockid, (struct sockaddr *)&client_addr, clilen)) == -1)
-		{ /* accept connection and create a socket descriptor for actual work */
-			fprintf(stderr, "Tracker Cannot accept...\n");
+		{						/* accept connection and create a socket descriptor for actual work */
+			if (errno == EINTR) // interrupted by a signal, not a real failure
+			{
+				continue;
+			}
+			perror("Tracker Cannot accept...\n");
 			continue;
 		}
 
@@ -175,13 +178,16 @@ peer_handler(int sock_child, const char *shared_directory)
 		printf("list request handled.\n");
 	}
 	else if ((strstr(read_msg, "get") != NULL) || (strstr(read_msg, "GET") != NULL))
-	{										 // get command received
-		char *fname = xtrct_fname(read_msg); // extract filename from the command
-		if (fname == NULL)
+	{ // get command received
+		char *fname[256];
+		if (xtract_fname(read_msg, fname, sizeof(fname)) == NULL) // extract filename from the command
 		{
 			fprintf(stderr, "The filename could not be extracted.\n");
 		}
-		handle_get_req(sock_child, fname, shared_directory);
+		else
+		{
+			handle_get_req(sock_child, fname, shared_directory);
+		}
 	}
 	else if ((strstr(read_msg, "createtracker") != NULL) || (strstr(read_msg, "Createtracker") != NULL) || (strstr(read_msg, "CREATETRACKER") != NULL))
 	{ // get command received

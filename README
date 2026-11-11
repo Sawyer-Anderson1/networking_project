@@ -1,4 +1,4 @@
 Tracker Compilation Command (This will go into the makefile)
-    gcc -Iinclude -Wall -Wextra src/tracker/tracker.c src/tracker/tracker_command.c src/config_loaders.c md5_handler.c -o tracker -lcrypto -pthread
+    gcc -Iinclude -Wall -Wextra src/tracker/tracker.c src/tracker/tracker_commands.c src/config_loaders.c src/md5_handler.c -o tracker -lcrypto -pthread
 
 Include -Wall -Wextra for testing and bug fixing

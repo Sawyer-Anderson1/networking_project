@@ -426,7 +426,12 @@ int handle_get_req(int server_worker, const char *fname, const char *shared_dire
     }
 
     // MD5 of the tracker file content, the peer checks the received data against this
-    compute_md5_hex((unsigned char *)buffer, (size_t)size, md5);
+    if (compute_md5_hex((unsigned char *)buffer, (size_t)size, md5) != 0)
+    {
+        fprintf(stderr, "GET: could not compute MD5 for %s\n", fname);
+        free(buffer);
+        return -1;
+    }
 
     // Then write the contents of the file to the peer
     char end_line[64];
@@ -481,6 +486,9 @@ int handle_get_req(int server_worker, const char *fname, const char *shared_dire
 
 CreateCommand tokenize_createmsg(char read_msg)
 {
+    CreateCommand command_args = {0};
+
+    return command_args;
 }
 
 void handle_createtracker_req(int server_worker, CreateCommand command)
@@ -489,6 +497,9 @@ void handle_createtracker_req(int server_worker, CreateCommand command)
 
 UpdateCommand tokenize_updatemsg(char read_msg)
 {
+    UpdateCommand command_args = {0};
+
+    return command_args;
 }
 
 void handle_updatetracker_req(int server_worker, UpdateCommand command)
