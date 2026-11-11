@@ -46,7 +46,7 @@ void *worker_thread(void *arg)
 	return NULL;
 }
 
-main()
+int main(void)
 {
 	pid_t pid;
 	struct sockaddr_in server_addr, client_addr;
@@ -199,12 +199,12 @@ void peer_handler(int sock_child, const char *shared_directory)
 	else if ((strstr(read_msg, "createtracker") != NULL) || (strstr(read_msg, "Createtracker") != NULL) || (strstr(read_msg, "CREATETRACKER") != NULL))
 	{ // get command received
 		CreateCommand command_struct = tokenize_createmsg(read_msg);
-		handle_createtracker_req(sock_child, command_struct);
+		handle_createtracker_req(sock_child, command_struct, shared_directory);
 	}
 	else if ((strstr(read_msg, "updatetracker") != NULL) || (strstr(read_msg, "Updatetracker") != NULL) || (strstr(read_msg, "UPDATETRACKER") != NULL))
 	{ // get command received
 		UpdateCommand command_struct = tokenize_updatemsg(read_msg);
-		handle_updatetracker_req(sock_child, command_struct);
+		handle_updatetracker_req(sock_child, command_struct, shared_directory);
 	}
 
 } // end client handler function

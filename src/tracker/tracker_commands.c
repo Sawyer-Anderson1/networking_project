@@ -1,6 +1,9 @@
 #include "project_502/tracker_commands.h"
 #include "project_502/common.h"
 #include "project_502/md5_handler.h"
+#include <arpa/inet.h>
+#include <time.h>
+#include <errno.h>
 
 #include <dirent.h>
 /* dirent.h Commands or Data Types Used:
@@ -487,21 +490,257 @@ int handle_get_req(int server_worker, const char *fname, const char *shared_dire
 CreateCommand tokenize_createmsg(const char *read_msg)
 {
     CreateCommand command_args = {0};
+    char ip_string[INET_ADDRSTRLEN] = {0};
+    unsigned int port = 0;
 
+    int fields = sscanf(read_msg, " <createtracker %255s %zu %1023s %32s %15s %u", command_args.filename, &command_args.filesize, command_args.description, command_args.md5_string, ip_string, &port);
+    if (fields != 6)
+    {
+        fprintf(stderr, "Invalid createtracker request");
+        return command_args;
+    }
+
+    if (inet_pton(AF_INET, ip_string, &command_args.peer_ip) != 1 || port == 0 || port > 65535)
+    {
+        fprintf(stderr, "Invalid IP addres or port\n");
+        return command_args;
+    }
+    command_args.peer_port = (unsigned short int)port;
+    command_args.valid = 1;
     return command_args;
 }
 
-void handle_createtracker_req(int server_worker, CreateCommand command)
+void handle_createtracker_req(int server_worker, CreateCommand command, const char *shared_directory)
 {
+    // Reject invalid requests
+    if (!command.valid || command.filename[0] == '\0' ||
+        strchr(command.filename, '/') != NULL ||
+        strcmp(command.filename, ".") == 0 ||
+        strcmp(command.filename, "..") == 0)
+        {
+            send_all(server_worker, "<createtracker fail>\n", strlen("<createtracker fail>\n"));
+            return;
+        }
+
+        // Build the path to new tracker file
+        char filepath[1024];
+        int length = snprintf(filepath, sizeof(filepath), "%s/%s.track", shared_directory, command.filename);
+        if (length < 0 || (size_t)length >= sizeof(filepath))
+        {
+            send_all(server_worker, "<createtracker fail>\n", strlen("<createtracker fail>\n"));
+            return;
+        }
+
+        //Convert peer IP atddress into readable text
+        char ip_string[INET_ADDRSTRLEN];
+
+        if (inet_ntop(AF_INET, &command.peer_ip, ip_string, sizeof(ip_string)) == NULL)
+        {
+            send_all(server_worker, "<createtracker fail>\n", strlen("<createtracker fail>\n"));
+            return;
+        }
+
+        pthread_mutex_lock(&tracker_mutex);
+
+        FILE *file = fopen(filepath, "wx");
+
+        if (file == NULL)
+        {
+            int already_exists = (errno == EEXIST);
+            pthread_mutex_unlock(&tracker_mutex);
+
+            const char *response = already_exists
+                ? "<createtracker ferr>\n"
+                : "<createtracker fail>\n";
+
+                send_all(server_worker, response, strlen(response));
+                return;
+        }
+
+        int result = fprintf(file, 
+                            "Filename: %s\n"
+                            "Filesize: %zu\n"
+                            "Description: %s\n"
+                            "MD5: %s\n"
+                            "#list of peers follows next\n"
+                            "%s:%u:0:%zu:%lld\n",
+                            command.filename, command.filesize, command.description, command.md5_string, ip_string, (unsigned int)command.peer_port, command.filesize, (long long)time(NULL));
+        int close_result = fclose(file);
+
+        if (result < 0 || close_result != 0)
+        {
+            remove(filepath);
+            pthread_mutex_unlock(&tracker_mutex);
+            send_all(server_worker, "<createtracker fail>\n", strlen("<createtracker fail>\n"));
+            return;
+        }
+
+        pthread_mutex_unlock(&tracker_mutex);
+
+        send_all(server_worker, "<createtracker succ>\n", strlen("<createtracker succ>\n"));
+
+        printf("created tracker: %s\n", filepath);
+
+
+
+
+
+
+
 }
 
 UpdateCommand tokenize_updatemsg(const char *read_msg)
 {
     UpdateCommand command_args = {0};
 
+    char ip_string[INET_ADDRSTRLEN];
+    unsigned int port;
+
+    int fields = sscanf(read_msg, " <updatetracker %255s %lu %lu %15s %u", command_args.filename, &command_args.start_byte, &command_args.end_byte, ip_string, &port);
+
+    if (fields != 5) 
+    {
+        printf("Invalid update request\n");
+        return command_args;
+    }
+
+    if (inet_pton(AF_INET, ip_string, &command_args.peer_ip) != 1 || port == 0 || port > 65535)
+    {
+        printf("Invalid IP or port\n");
+        return command_args;
+    }
+
+    command_args.peer_port = (unsigned short int)port;
+    command_args.valid = 1;
     return command_args;
 }
 
-void handle_updatetracker_req(int server_worker, UpdateCommand command)
+void handle_updatetracker_req(int server_worker, UpdateCommand command, const char *shared_directory)
 {
+    char filepath[1024];
+    char response[512];
+
+    // Check whether the request is valid.
+    if (!command.valid || command.filename[0] == '\0' || strchr(command.filename, '/') != NULL || strcmp(command.filename, ".") == 0 || strcmp(command.filename, "..") == 0) 
+    {
+        snprintf(response, sizeof(response), "<updatetracker %s fail>\n", command.filename);
+        send_all(server_worker, response, strlen(response));
+        return;
+    }
+
+    // Build the path to the tracker file.
+    int length = snprintf(filepath, sizeof(filepath), "%s/%s.track", shared_directory, command.filename);
+
+    if (length < 0 || (size_t)length >= sizeof(filepath)) 
+    {
+        snprintf(response, sizeof(response), "<updatetracker %s fail>\n", command.filename);
+        send_all(server_worker, response, strlen(response));
+        return;
+    }
+
+    // Open the existing tracker file for reading.
+    pthread_mutex_lock(&tracker_mutex);
+
+    FILE *file = fopen(filepath, "r");
+
+    if (file == NULL) 
+    {
+        int missing = (errno == ENOENT);
+
+        pthread_mutex_unlock(&tracker_mutex);
+
+        snprintf(response, sizeof(response), "<updatetracker %s %s>\n", command.filename, missing ? "ferr" : "fail");
+        send_all(server_worker, response, strlen(response));
+        return;
+    }
+
+ // Create a temporary file to hold the updated information.
+    char temp_path[1100];
+    snprintf(temp_path, sizeof(temp_path), "%s.tmp", filepath);
+
+    FILE *temp = fopen(temp_path, "w");
+
+    if (temp == NULL) 
+    {
+        fclose(file);
+        pthread_mutex_unlock(&tracker_mutex);
+
+        snprintf(response, sizeof(response), "<updatetracker %s fail>\n", command.filename);
+        send_all(server_worker, response, strlen(response));
+        return;
+    }
+
+    // Convert the peer's IP address into readable text.
+    char ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &command.peer_ip, ip, sizeof(ip));
+
+    char line[2048];
+    int found = 0;
+    int error = 0;
+
+    // Read the tracker file one line at a time.
+    while (fgets(line, sizeof(line), file) != NULL) {
+        char old_ip[INET_ADDRSTRLEN];
+        unsigned int old_port;
+        unsigned long long start, end;
+        long long timestamp;
+
+        // Check whether this line contains peer information.
+        int fields = sscanf(line, "%15[^:]:%u:%llu:%llu:%lld", old_ip, &old_port, &start, &end, &timestamp);
+
+        if (fields == 5 && strcmp(old_ip, ip) == 0 && old_port == command.peer_port) 
+        {
+            // Existing peer: replace its byte range and timestamp.
+            if (fprintf(temp, "%s:%u:%llu:%llu:%lld\n", ip, (unsigned int)command.peer_port, (unsigned long long)command.start_byte, (unsigned long long)command.end_byte, (long long)time(NULL)) < 0) 
+            {
+                error = 1;
+            }
+
+            found = 1;
+        } 
+        else 
+        {
+            // Keep all other lines unchanged.
+            if (fputs(line, temp) == EOF)
+            {
+                error = 1;
+            }
+        }
+    }
+
+    // New peer: append its information.
+    if (!found && !error) 
+    {
+        if (fprintf(temp, "%s:%u:%llu:%llu:%lld\n", ip, (unsigned int)command.peer_port, (unsigned long long)command.start_byte, (unsigned long long)command.end_byte, (long long)time(NULL)) < 0) 
+        {
+            error = 1;
+        }
+    }
+
+    if (ferror(file))
+    {
+        error = 1;
+    }
+
+    fclose(file);
+
+    if (fclose(temp) != 0)
+    {
+        error = 1;
+    }
+
+    // Replace the old file only if everything worked.
+    if (!error && rename(temp_path, filepath) == 0)
+    {
+        snprintf(response, sizeof(response), "<updatetracker %s succ>\n", command.filename);
+    } 
+    else 
+    {
+        remove(temp_path);
+        snprintf(response, sizeof(response), "<updatetracker %s fail>\n", command.filename);
+    }
+
+    pthread_mutex_unlock(&tracker_mutex);
+    send_all(server_worker, response, strlen(response));
+
 }
