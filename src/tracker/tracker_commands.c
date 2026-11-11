@@ -316,7 +316,7 @@ char *xtract_fname(const char *read_msg, char *fname, size_t out_size)
     tok = strtok_r(copy, " ", &saveptr); // To get '<GET' before filename
     tok = strtok_r(NULL, " ", &saveptr); // To get second token, the filename.track
 
-    if (tok == NULL || strlen(tok) >= sizeof(fname))
+    if (tok == NULL || strlen(tok) >= out_size)
         return NULL; /* missing or too long */
     if (strchr(tok, '/') != NULL || strstr(tok, "..") != NULL)
         return NULL; /* path traversal attempt */
@@ -484,7 +484,7 @@ int handle_get_req(int server_worker, const char *fname, const char *shared_dire
     return 0;
 }
 
-CreateCommand tokenize_createmsg(char read_msg)
+CreateCommand tokenize_createmsg(const char *read_msg)
 {
     CreateCommand command_args = {0};
 
@@ -495,7 +495,7 @@ void handle_createtracker_req(int server_worker, CreateCommand command)
 {
 }
 
-UpdateCommand tokenize_updatemsg(char read_msg)
+UpdateCommand tokenize_updatemsg(const char *read_msg)
 {
     UpdateCommand command_args = {0};
 
