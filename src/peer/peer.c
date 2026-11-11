@@ -489,7 +489,35 @@ static void cmd_get(const char *trackname)
     else
     {
         printf("[!] Tracker file MD5 mismatch (got %s, expected %s)\n", got_md5, tracker_md5);
+        free(reply); // Release the received response from memory
+        return; // Stop before saving or using unverified tracker data
     }
+
+    char tracker_path[600]; // Reserve space for the dest path.
+    snprintf(tracker_path, sizeof(tracker_path), "%s/%s", //dest path
+            upload_cfg.peer_data_folder, trackname);  // Combine the shared folder and tracker filename.
+
+    FILE *tracker_file = fopen(tracker_path, "wb"); //open file
+    if (!tracker_file) //check if opened sucessfully
+    {
+        perror("Could not save tracker file");
+        free(reply); // Release the received response from memory.
+        return; // Stop because the tracker file cannot be saved.
+    }
+
+    int saved = fwrite(content, 1, clen, tracker_file) == clen; // Check that all bytes were written
+    if (fclose(tracker_file) != 0) // Check for errors when closing.
+        saved = 0; // Mark the save as failed.
+
+    if (!saved)
+    {
+        fprintf(stderr, "Failed to write tracker file\n");
+        unlink(tracker_path); // Delete the incomplete file.
+        free(reply); // Free the response memory.
+        return; // Stop here.
+    }
+
+printf("Tracker file saved to %s\n", tracker_path);
 
     /* Parse tracker file for filename, filesize, file MD5, and first available peer */
     char *text = strndup(content, clen);
