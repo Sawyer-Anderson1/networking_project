@@ -30,6 +30,7 @@
 /* arpa/inet.h Commands Used:
     inet_pton: Used to convert IP strings to binary
 */
+#include <errno.h>
 
 // Static helper function to trim whitespace from string
 static void trim(char *str)
@@ -51,6 +52,34 @@ static void trim(char *str)
     if (start > 0)
     { // i.e. there is leading whitespace
         memmove(str, str + start, len - start + 1);
+    }
+}
+
+// Static helper function to convert a string into an int within [min, max]
+// Returns 1 on success, 0 on failure (not a number, trailing junk, or out of range)
+static int parse_int(const char *str, long min, long max, int *out)
+{
+    char *endptr;
+    errno = 0; // strtol reports overflow through errno
+    long val = strtol(str, &endptr, 10);
+
+    // endptr == str means no digits were read, *endptr != '\0' means there was junk after the number
+    if (errno != 0 || endptr == str || *endptr != '\0' || val < min || val > max)
+    {
+        return 0;
+    }
+
+    *out = (int)val;
+    return 1;
+}
+
+// Static helper function to cut an inline comment (anything from '#' or ';' onward) off a string
+static void strip_inline_comment(char *str)
+{
+    char *comment = strpbrk(str, "#;"); // finds the first '#' or ';' in the string
+    if (comment)
+    {
+        *comment = '\0'; // end the string where the comment starts
     }
 }
 
@@ -92,12 +121,21 @@ int sconfig_loader(const char *filename, SConfig *config)
         char *key = line;
         char *value = delimiter + 1;
 
+        strip_inline_comment(value); // drop trailing comments like "# 20 mins, in secs"
+
         trim(key);
         trim(value);
 
         // Assign values to the sconfig structure
         if (strcmp(key, "server_port") == 0)
         {
+            int port;
+            if (!parse_int(value, 1024, 65535, &port))
+            {
+                fprintf(stderr, "Invalid server_port in sconfig.cfg: %s\n", value);
+                fclose(file);
+                return 0;
+            }
             config->server_port = atoi(value);
         }
         else if (strcmp(key, "shared_directory") == 0)
@@ -106,7 +144,13 @@ int sconfig_loader(const char *filename, SConfig *config)
         }
         else if (strcmp(key, "dead_peer_timeout") == 0)
         {
-            strncpy(config->dead_peer_timeout, value, sizeof(config->dead_peer_timeout) - 1);
+            // 1 second up to 1 day, anything else is treated as a config error
+            if (!parse_int(value, 1, 86400, &config->dead_peer_timeout))
+            {
+                fprintf(stderr, "Invalid dead_peer_timeout in sconfig.cfg: %s\n", value);
+                fclose(file);
+                return 0;
+            }
         }
         else
         {
@@ -149,13 +193,22 @@ int client_thread_config_loader(const char *filename, ClientThreadConfig *config
         char *key = line;
         char *value = delimiter + 1;
 
+        strip_inline_comment(value); // drop trailing comments like "# 20 mins, in secs"
+
         trim(key);
         trim(value);
 
         // Assign values to the clientthreadconfig structure
         if (strcmp(key, "server_port") == 0)
         {
-            config->server_port = atoi(value);
+            int port;
+            if (!parse_int(value, 1024, 65535, &port))
+            {
+                fprintf(stderr, "Invalid server_port in clientThreadConfig.cfg: %s\n", value);
+                fclose(file);
+                return 0;
+            }
+            config->server_port = (unsigned short)port;
         }
         else if (strcmp(key, "server_ip") == 0)
         {
@@ -180,7 +233,12 @@ int client_thread_config_loader(const char *filename, ClientThreadConfig *config
         }
         else if (strcmp(key, "update_interval") == 0)
         {
-            strncpy(config->update_interval, value, sizeof(config->update_interval) - 1);
+            if (!parse_int(value, 1, 86400, &config->update_interval))
+            {
+                fprintf(stderr, "Invalid update_interval in clientThreadConfig.cfg: %s\n", value);
+                fclose(file);
+                return 0;
+            }
         }
         else
         {
@@ -224,12 +282,21 @@ int server_thread_config_loader(const char *filename, ServerThreadConfig *config
         char *key = line;
         char *value = delimiter + 1;
 
+        strip_inline_comment(value); // drop trailing comments like "# 20 mins, in secs"
+
         trim(key);
         trim(value);
 
         // Assign values to the serverthreadconfig structure
         if (strcmp(key, "peer_port") == 0)
         {
+            int port;
+            if (!parse_int(value, 1024, 65535, &port))
+            {
+                fprintf(stderr, "Invalid server_port in serverThreadConfig.cfg: %s\n", value);
+                fclose(file);
+                return 0;
+            }
             config->peer_port = atoi(value);
         }
         else if (strcmp(key, "peer_data_folder") == 0)

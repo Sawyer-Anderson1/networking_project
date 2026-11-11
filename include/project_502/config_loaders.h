@@ -6,12 +6,14 @@
     in_addr: stuct for IP addresses
 */
 
+#define CONFIG_PATH_LEN 256
+
 // Structure to hold configuration values
 // For tracker server:
 typedef struct
 {
     unsigned short int server_port;
-    char shared_directory;
+    char shared_directory[CONFIG_PATH_LEN];
     int dead_peer_timeout;
 } SConfig;
 
@@ -35,7 +37,7 @@ typedef struct
     // in other possible values
     // ...
 
-    char peer_data_folder;
+    char peer_data_folder[CONFIG_PATH_LEN];
 } ServerThreadConfig;
 
 // Public function declaration
