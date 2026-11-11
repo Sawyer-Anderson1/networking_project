@@ -132,11 +132,14 @@ main()
 		int sock_child;
 		socklen_t clilen = sizeof(client_addr);
 		if ((sock_child = accept(sockid, (struct sockaddr *)&client_addr, clilen)) == -1)
-		{						/* accept connection and create a socket descriptor for actual work */
+		{ /* accept connection and create a socket descriptor for actual work */
+			// Possible fix to the accept loop
+			/*
 			if (errno == EINTR) // interrupted by a signal, not a real failure
 			{
 				continue;
 			}
+			*/
 			perror("Tracker Cannot accept...\n");
 			continue;
 		}
