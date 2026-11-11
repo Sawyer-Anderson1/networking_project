@@ -36,6 +36,18 @@
 /* stdlib.h Commands Used:
     free
 */
+#include <pthread.h>
+/* pthread.h Commands/Data Types Used:
+    the pthread_mutex_t and PTHREAD_MUTEX_INITIALIZER
+    pthread_mutex_lock and pthread_mutex_unlock
+*/
+
+// Define the mutex protecting every read and write of the tracker files in the torrents dir
+// Static variable, private to this file only
+static pthread_mutex_t tracker_mutex = PTHREAD_MUTEX_INITIALIZER;
+// when the dead-peer cleanup thread is implemented in another file this mutex would need to be used in that
+//  and can be provided using extern ...
+// Use the mutex around file access reads and writes, not around send calls (more efficient that way)
 
 // Static helper functions
 static char *trim_whitespace(char *str)
@@ -62,12 +74,36 @@ static char *trim_whitespace(char *str)
     return str;
 }
 
+// Helper function to send every byte of a buffer, handling partial writes
+static int send_all(int s, const char *buf, size_t len)
+{
+    size_t total_sent = 0;
+    while (total_sent < len)
+    {
+        ssize_t bytes_sent = send(s, buf + total_sent, len - total_sent, 0);
+        if (bytes_sent <= 0)
+        {
+            return -1;
+        }
+        total_sent += (size_t)bytes_sent;
+    }
+    return 0;
+}
+
+// Helper function to check that a filename ends in ".track"
+static int has_track_suffix(const char *name)
+{
+    size_t n = strlen(name);
+    size_t suffix_len = strlen(".track");
+    return n > suffix_len && strcmp(name + n - suffix_len, ".track") == 0;
+}
+
 // Struct for LIST's Response
 typedef struct
 {
     char filename[256];
     size_t filesize;
-    unsigned char md5_string[MD5_HEX_LEN]; // Converted from the unsigned char [16] of the binary/byte form, so the final value can be displayed
+    char md5_string[MD5_HEX_LEN]; // Converted from the unsigned char [16] of the binary/byte form, so the final value can be displayed
 } RESP_LIST;
 
 // Helper function to append a new file information to the LIST Response array
@@ -96,9 +132,13 @@ int handle_list_req(int server_worker, const char *shared_directory)
     char dir_path[512];
     snprintf(dir_path, sizeof(dir_path), "./%s", shared_directory);
 
+    // Lock mutex to keep updatetracker from updating the file while it reads from it
+    pthread_mutex_lock(&tracker_mutex);
+
     DIR *torrents = opendir(dir_path);
     if (torrents == NULL)
     {
+        pthread_mutex_unlock(&tracker_mutex);
         fprintf(stderr, "Unable to open directory: %s\n", shared_directory);
         return -1;
     }
@@ -196,6 +236,7 @@ int handle_list_req(int server_worker, const char *shared_directory)
             if (!add_resp(&resp_arr, &count, &capacity, new_resp))
             {
                 fprintf(stderr, "Memory allocation failed.\n");
+                pthread_mutex_unlock(&tracker_mutex);
                 free(resp_arr);
                 closedir(torrents);
                 return -1;
@@ -204,6 +245,8 @@ int handle_list_req(int server_worker, const char *shared_directory)
     }
 
     closedir(torrents); // Close the directory stream
+
+    pthread_mutex_unlock(&tracker_mutex);
 
     // Then write the contents of the RESP_LIST array to the peer
     char send_buf[512];
@@ -254,35 +297,11 @@ int handle_list_req(int server_worker, const char *shared_directory)
     return 0;
 }
 
-// Helper function to send every byte of a buffer, handling partial writes
-static int send_all(int s, const char *buf, size_t len)
-{
-    size_t total_sent = 0;
-    while (total_sent < len)
-    {
-        ssize_t bytes_sent = send(s, buf + total_sent, len - total_sent, 0);
-        if (bytes_sent <= 0)
-        {
-            return -1;
-        }
-        total_sent += (size_t)bytes_sent;
-    }
-    return 0;
-}
-
-// Helper function to check that a filename ends in ".track"
-static int has_track_suffix(const char *name)
-{
-    size_t n = strlen(name);
-    size_t suffix_len = strlen(".track");
-    return n > suffix_len && strcmp(name + n - suffix_len, ".track") == 0;
-}
-
-char fname[256];
-char *xtract_fname(char *read_msg)
+char *xtract_fname(const char *read_msg, char *fname, size_t out_size)
 {
     char copy[MAXLINE];
     char *tok;
+    char *saveptr = NULL; // strtok_r keeps its state here, so the threads do not share it
     int len;
 
     strncpy(copy, read_msg, MAXLINE - 1);
@@ -294,8 +313,8 @@ char *xtract_fname(char *read_msg)
                        copy[len - 1] == ' ' || copy[len - 1] == '>'))
         copy[--len] = '\0';
 
-    tok = strtok(copy, " "); // To get '<GET' before filename
-    tok = strtok(NULL, " "); // To get second token, the filename.track
+    tok = strtok_r(copy, " ", &saveptr); // To get '<GET' before filename
+    tok = strtok_r(NULL, " ", &saveptr); // To get second token, the filename.track
 
     if (tok == NULL || strlen(tok) >= sizeof(fname))
         return NULL; /* missing or too long */
@@ -313,9 +332,13 @@ int handle_get_req(int server_worker, const char *fname, const char *shared_dire
     char dir_path[512];
     snprintf(dir_path, sizeof(dir_path), "./%s", shared_directory);
 
+    // Lock mutex to keep updatetracker from updating the file while it reads from it
+    pthread_mutex_lock(&tracker_mutex);
+
     DIR *torrents = opendir(dir_path);
     if (torrents == NULL)
     {
+        pthread_mutex_unlock(&tracker_mutex);
         fprintf(stderr, "Unable to open directory: %s\n", shared_directory);
         return -1;
     }
@@ -391,6 +414,9 @@ int handle_get_req(int server_worker, const char *fname, const char *shared_dire
     }
 
     closedir(torrents); // Close the directory stream, every path above ends up here
+
+    // Now done with the files, so free the mutex
+    pthread_mutex_unlock(&tracker_mutex);
 
     // File was not found or could not be read
     if (buffer == NULL)

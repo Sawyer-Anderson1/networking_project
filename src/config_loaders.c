@@ -76,19 +76,19 @@ int sconfig_loader(const char *filename, SConfig *config)
         trim(line);
 
         // Skip comments and empty lines
-        if (line[0] == "\0" || line[0] == "#" || line[0] == ";")
+        if (line[0] == '\0' || line[0] == '#' || line[0] == ';')
         {
             continue;
         }
 
         // Split the line by the "=" char, to get the values for the variables
-        char *delimiter = strchr(line, "=");
+        char *delimiter = strchr(line, '=');
         if (!delimiter)
         {
             continue; // malformed line, skip
         }
 
-        *delimiter = "\0";
+        *delimiter = '\0';
         char *key = line;
         char *value = delimiter + 1;
 
@@ -133,19 +133,19 @@ int client_thread_config_loader(const char *filename, ClientThreadConfig *config
         trim(line);
 
         // Skip comments and empty lines
-        if (line[0] == "\0" || line[0] == "#" || line[0] == ";")
+        if (line[0] == '\0' || line[0] == '#' || line[0] == ';')
         {
             continue;
         }
 
         // Split the line by the "=" char, to get the values for the variables
-        char *delimiter = strchr(line, "=");
+        char *delimiter = strchr(line, '=');
         if (!delimiter)
         {
             continue; // malformed line, skip
         }
 
-        *delimiter = "\0";
+        *delimiter = '\0';
         char *key = line;
         char *value = delimiter + 1;
 
@@ -208,19 +208,19 @@ int server_thread_config_loader(const char *filename, ServerThreadConfig *config
         trim(line);
 
         // Skip comments and empty lines
-        if (line[0] == "\0" || line[0] == "#" || line[0] == ";")
+        if (line[0] == '\0' || line[0] == '#' || line[0] == ';')
         {
             continue;
         }
 
         // Split the line by the "=" char, to get the values for the variables
-        char *delimiter = strchr(line, "=");
+        char *delimiter = strchr(line, '=');
         if (!delimiter)
         {
             continue; // malformed line, skip
         }
 
-        *delimiter = "\0";
+        *delimiter = '\0';
         char *key = line;
         char *value = delimiter + 1;
 
