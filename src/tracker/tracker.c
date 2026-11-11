@@ -15,12 +15,42 @@
 /* sys/stat.h Commands Used:
 	mkdir(): To make the shared torrent directory
 */
+#include <pthread.h>
+/*
+	Now add -pthread to compile line
+*/
+#include <signal.h>
+/* Commands or Data Types Used:
+	signal(SIGPIPE, SIG_IGN): Ignores disconnected peers from closing socket
+*/
+
+// arguements handed to each worker thread
+typedef struct
+{
+	int sock_child;
+	const char *shared_directory;
+} WorkerArgs;
+
+// Worker thread: servers one peer, then closes the connection
+void *worker_thread(void *arg)
+{
+	WorkerArgs *args = (WorkerArgs *)arg;
+
+	peer_handler(args->sock_child, args->shared_directory);
+	close(args->sock_child); // Worker closes the connection
+	free(args);				 // the arguments were malloc'd by accept
+	return NULL;
+}
 
 main()
 {
 	pid_t pid;
 	struct sockaddr_in server_addr, client_addr;
+	int yes;
 	int sockid;
+
+	signal(SIGPIPE, SIG_IGN); // a peer hanging up must not kill the whole tracker
+
 	if ((sockid = socket(AF_INET, SOCK_STREAM, 0)) < 0)
 	{ // create socket connection oriented
 		printf("socket cannot be created \n");
@@ -47,9 +77,31 @@ main()
 	{
 		printf("Directory '%s' created successfully.\n", shared_directory);
 	}
+
+	if (errno == EEXIST)
+	{
+		// This mean the directory already exists in the file system, so needs to be done
+		struct stat st;
+		// Verify that the existing path is actually a directory
+		if (stat(shared_directory, &st) == 0 && S_ISDIR(st.st_mode))
+		{
+			// Directory already exists do nothing
+		}
+		// Path exists, but it is a file or broken symlink
+		errno = ENOTDIR;
+	}
 	else
 	{
 		fprintf(stderr, "Failed to create the shared directory %s\n", shared_directory);
+		exit(1);
+	}
+
+	// Enable SO_REUSEADDR before calling bind(), allows for quick restarts during testing, etc.
+	if (setsockopt(sockid, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) < 0)
+	{
+		fprintf(stderr, "setsockopt(SO_REUSEADDR) failed");
+		close(sockid);
+		exit(1);
 	}
 
 	// socket created at this stage
@@ -79,30 +131,42 @@ main()
 	while (1)
 	{ // accept  connection from every requester client
 		int sock_child;
-		if ((sock_child = accept(sockid, (struct sockaddr *)&client_addr, sizeof(client_addr))) == -1)
+		socklen_t clilen = sizeof(client_addr);
+		if ((sock_child = accept(sockid, (struct sockaddr *)&client_addr, clilen)) == -1)
 		{ /* accept connection and create a socket descriptor for actual work */
 			fprintf(stderr, "Tracker Cannot accept...\n");
-			exit(1);
+			continue;
 		}
 
-		// create the worker threads via fork
-		if ((pid = fork()) == 0)
-		{												// New child process will serve the requester client. separate child will serve separate client
-			close(sockid);								// child does not need listener
-			peer_handler(sock_child, shared_directory); // child is serving the client.
-			close(sock_child);							// printf("\n 1. closed");
-			exit(0);									// kill the process. child process all done with work
+		// Hand the connection to a new worker thread
+		WorkerArgs *args = malloc(sizeof(WorkerArgs));
+		if (args == NULL)
+		{
+			fprintf(stderr, "Out of memory, dropping connection.\n");
+			close(sock_child);
+			continue;
 		}
-		close(sock_child); // parent all done with client, only child will communicate with that client from now
+		args->sock_child = sock_child;
+		args->shared_directory = shared_directory;
+
+		pthread_t tid;
+		if (pthread_create(&tid, NULL, worker_thread, args) != 0)
+		{
+			fprintf(stderr, "pthread_create failure\n");
+			close(sock_child);
+			free(args);
+			continue;
+		}
+		pthread_detach(tid);
 	} // accept loop ends
 } // main fun ends
 
-peer_handler(int sock_child, const char shared_directory)
+peer_handler(int sock_child, const char *shared_directory)
 { // function for file transfer. child process will call this function
 	// start handiling client request
 	int length;
-	char read_msg[MAXLINE - 1]; // MAXLINE - 1 since we add \0 at the end
-	length = read(sock_child, read_msg, MAXLINE);
+	char read_msg[MAXLINE];
+	length = read(sock_child, read_msg, MAXLINE - 1);
 
 	read_msg[length] = '\0';
 	if ((strcmp(read_msg, "REQ LIST") == 0) || (strcmp(read_msg, "req list") == 0) || (strcmp(read_msg, "<REQ LIST>") == 0) || (strcmp(read_msg, "<REQ LIST>\n") == 0))
@@ -111,8 +175,12 @@ peer_handler(int sock_child, const char shared_directory)
 		printf("list request handled.\n");
 	}
 	else if ((strstr(read_msg, "get") != NULL) || (strstr(read_msg, "GET") != NULL))
-	{										// get command received
-		char fname = xtrct_fname(read_msg); // extract filename from the command
+	{										 // get command received
+		char *fname = xtrct_fname(read_msg); // extract filename from the command
+		if (fname == NULL)
+		{
+			fprintf(stderr, "The filename could not be extracted.\n");
+		}
 		handle_get_req(sock_child, fname, shared_directory);
 	}
 	else if ((strstr(read_msg, "createtracker") != NULL) || (strstr(read_msg, "Createtracker") != NULL) || (strstr(read_msg, "CREATETRACKER") != NULL))

@@ -17,10 +17,10 @@ static void digest_to_hex(const unsigned char *digest, unsigned int digest_len, 
         sprintf(out_hex + (i * 2), "%02x", digest[i]);
     }
 
-    out_hex[digest_len * 2] = "\0";
+    out_hex[digest_len * 2] = '\0';
 }
 
-void compute_md5_hex(const unsigned char *data, size_t *len, unsigned char *out_hex)
+int compute_md5_hex(const unsigned char *data, size_t *len, unsigned char *out_hex)
 {
     unsigned char digest[EVP_MAX_MD_SIZE];
     unsigned int digest_len = 0;
