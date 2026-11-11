@@ -36,9 +36,9 @@ typedef struct
 int handle_list_req(int server_worker, const char *shared_directory);
 char *xtract_fname(const char *read_msg, char *fname, size_t out_size);
 int handle_get_req(int server_worker, const char *fname, const char *shared_directory);
-CreateCommand tokenize_createmsg(char read_msg);
+CreateCommand tokenize_createmsg(const char *read_msg);
 void handle_createtracker_req(int server_worker, CreateCommand command);
-UpdateCommand tokenize_updatemsg(char read_msg);
+UpdateCommand tokenize_updatemsg(const char *read_msg);
 void handle_updatetracker_req(int server_worker, UpdateCommand command);
 
 #endif

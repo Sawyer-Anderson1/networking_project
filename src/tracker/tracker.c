@@ -10,7 +10,9 @@
 #include <netinet/in.h>
 #include <errno.h>
 #include <sys/dir.h>
-
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 #include <sys/stat.h>
 /* sys/stat.h Commands Used:
 	mkdir(): To make the shared torrent directory
@@ -30,6 +32,8 @@ typedef struct
 	int sock_child;
 	const char *shared_directory;
 } WorkerArgs;
+
+void peer_handler(int sock_child, const char *shared_directory);
 
 // Worker thread: servers one peer, then closes the connection
 void *worker_thread(void *arg)
@@ -131,7 +135,7 @@ main()
 	{ // accept  connection from every requester client
 		int sock_child;
 		socklen_t clilen = sizeof(client_addr);
-		if ((sock_child = accept(sockid, (struct sockaddr *)&client_addr, clilen)) == -1)
+		if ((sock_child = accept(sockid, (struct sockaddr *)&client_addr, &clilen)) == -1)
 		{ /* accept connection and create a socket descriptor for actual work */
 			// Possible fix to the accept loop
 			/*
@@ -167,7 +171,7 @@ main()
 	} // accept loop ends
 } // main fun ends
 
-peer_handler(int sock_child, const char *shared_directory)
+void peer_handler(int sock_child, const char *shared_directory)
 { // function for file transfer. child process will call this function
 	// start handiling client request
 	int length;
@@ -182,7 +186,7 @@ peer_handler(int sock_child, const char *shared_directory)
 	}
 	else if ((strstr(read_msg, "get") != NULL) || (strstr(read_msg, "GET") != NULL))
 	{ // get command received
-		char *fname[256];
+		char fname[256];
 		if (xtract_fname(read_msg, fname, sizeof(fname)) == NULL) // extract filename from the command
 		{
 			fprintf(stderr, "The filename could not be extracted.\n");
